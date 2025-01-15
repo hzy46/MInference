@@ -355,7 +355,7 @@ if __name__ == "__main__":
 
         if args.num_eval_examples != -1:
             num_eval_examples = min(args.num_eval_examples, len(examples))
-            examples = examples[:num_eval_examples]
+            examples = examples.select(range(num_eval_examples))
 
         preds = []
         print(f"==== Evaluation {data_name}====")
