@@ -20,7 +20,7 @@ from transformers.models.llama.modeling_llama import (
 )
 
 
-def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size):
+def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size, ensure_first_chunk=False):
     # attn_weights (BS, head, query, keys)
     # attn_weights 是 q k 之后的，但 k 经过了 和 q 相关的 sign 反转和 合并（每 16 个是一样的）
 
@@ -72,7 +72,9 @@ def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size):
     mask_bottom = mask_bottom[:, :, :, :seq_length]
     # 确保第一个 page 在
     # ZHIYUAN：新修改
-    mask_bottom[:, :, :, :chunk_size] = True
+    if ensure_first_chunk:
+        print("ensure first page")
+        mask_bottom[:, :, :, :chunk_size] = True
 
     return mask_bottom
 
@@ -244,6 +246,7 @@ def quest_decode_kernel(
 ):
     chunk_size = decoding_kwargs["attn_forward_config"].get("chunk_size", 16)
     token_budget = decoding_kwargs["attn_forward_config"].get("token_budget", 1024)
+    ensure_first_chunk = decoding_kwargs["attn_forward_config"].get("ensure_first_chunk", False)
     attention_mask = decoding_kwargs.get("attention_mask", None)
     position_ids = decoding_kwargs.get("position_ids", None)
     kv_seq_len = key_states.size(-2)
@@ -328,7 +331,7 @@ def quest_decode_kernel(
 
     if token_budget > 0:
         mask_bottom = local_heavy_hitter_mask(
-            attn_weights_for_selection, token_budget, chunk_size
+            attn_weights_for_selection, token_budget, chunk_size, ensure_first_chunk
         )  # Default: No padding applied to input
     else:
         mask_bottom = torch.zeros_like(attn_weights_for_selection, dtype=torch.bool)
