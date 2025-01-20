@@ -138,6 +138,7 @@ def attn_forward(
                 "attn_forward_config": attn_forward_config,
                 "position_ids": position_ids,
                 "num_key_value_groups": self.num_key_value_groups,
+                "self": self,
             }
             attn_output = decoding_forward(  # [bsz, num_heads, q_len, head_dim]
                 query_states,

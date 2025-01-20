@@ -21,9 +21,8 @@ from transformers.models.llama.modeling_llama import (
 
 
 def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size):
-    from IPython import embed
-    embed()
     # attn_weights (BS, head, query, keys)
+    # attn_weights 是 q k 之后的，但 k 经过了 和 q 相关的 sign 反转和 合并（每 16 个是一样的）
 
     # expend attn_weights to be divisible by chunk_size
     seq_length = attn_weights.shape[-1]
@@ -58,14 +57,18 @@ def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size):
         k=min(max(3, token_budget // chunk_size), chunk_attn_weights.size(-1)), dim=-1
     )
     # repeat topk chunk_size times and recover the original indexes (* chunk_size + arange(chunk_size))
+    # 这里比较关键，上面取出的 topk 是 chunk_size 之后的 page，这里是* chunk_size 并且恢复了每个 page 所有的 index
     topk = topk.unsqueeze(-1).repeat(
         1, 1, 1, 1, chunk_size
     ) * chunk_size + torch.arange(chunk_size, device=topk.device)
+    # 下面这句话之后，topk 的形状是 [bsz, nh, 1, token budget]
+    # 表示每个head 保留 token budget 个 index
     topk = topk.reshape(topk.shape[0], topk.shape[1], topk.shape[2], -1)
     mask_bottom = torch.zeros_like(attn_weights, dtype=torch.bool)
     mask_bottom.scatter_(-1, topk, True)
 
     # remove the padding
+    # [bsz, nh, 1, seq_len], True 是要保留的，False 是不保留的
     mask_bottom = mask_bottom[:, :, :, :seq_length]
 
     return mask_bottom
@@ -241,7 +244,6 @@ def quest_decode_kernel(
     attention_mask = decoding_kwargs.get("attention_mask", None)
     position_ids = decoding_kwargs.get("position_ids", None)
     kv_seq_len = key_states.size(-2)
-    print(f"[quest_decode_kernel] query_states: {query_states.shape} key_states {key_states.shape}")
 
     # [bsz, nh, 1, seq_len] 这里还是做了 full attention 所以实际无加速
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
@@ -329,6 +331,7 @@ def quest_decode_kernel(
         mask_bottom = torch.zeros_like(attn_weights_for_selection, dtype=torch.bool)
 
     mask_bottom = torch.tril(mask_bottom, diagonal=position_ids[0][0].item())
+    # mask_bottom 是 True 的地方保留，这个就是 False 的地方，变成了最小值
     attn_weights[~mask_bottom] = torch.tensor(torch.finfo(attn_weights.dtype).min)
 
     # upcast attention to fp32
@@ -336,6 +339,20 @@ def quest_decode_kernel(
         query_states.dtype
     )
     attn_output = torch.matmul(attn_weights, value_states)
+
+    self = decoding_kwargs["self"]
+    if hasattr(self, "per_head_info_query_list") and len(self.per_head_info_query_list) > 0:
+        if hasattr(self, "debug_info") is False:
+            self.debug_info = {"per_head_info_list": []}
+        # 外面手动设置，我们要记录多次的
+        # self.debug_info["per_head_info_list"] = []
+        for head_info in self.per_head_info_query_list:
+            head_idx = head_info["head_idx"]
+            print(f"collect attention  for layer {self.layer_idx} head {head_idx}...")
+            self.debug_info["per_head_info_list"].append({
+                "head_idx": head_idx,
+                "attn_score": attn_weights.detach().cpu().numpy(),
+            })
 
     return attn_output
 
