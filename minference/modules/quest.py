@@ -70,6 +70,9 @@ def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size):
     # remove the padding
     # [bsz, nh, 1, seq_len], True 是要保留的，False 是不保留的
     mask_bottom = mask_bottom[:, :, :, :seq_length]
+    # 确保第一个 page 在
+    # ZHIYUAN：新修改
+    mask_bottom[:, :, :, :chunk_size] = True
 
     return mask_bottom
 
