@@ -80,7 +80,6 @@ def quest_forward(
     **kwargs,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
     bsz, q_len, _ = hidden_states.size()
-    print(f"[quest_forward] q_len: {q_len} layer_idx {self.layer_idx}")
 
     if q_len > 1 or self.layer_idx < 2:
         return self.flash_forward(
@@ -127,7 +126,6 @@ def quest_forward(
 
     key_states = repeat_kv(key_states, self.num_key_value_groups)
     value_states = repeat_kv(value_states, self.num_key_value_groups)
-    print(f"[quest_forward] query_states: {query_states.shape} key_states {key_states.shape}")
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
         self.head_dim
@@ -242,6 +240,8 @@ def quest_decode_kernel(
     position_ids = decoding_kwargs.get("position_ids", None)
     kv_seq_len = key_states.size(-2)
     print(f"[quest_decode_kernel] query_states: {query_states.shape} key_states {key_states.shape}")
+    from IPython import embed
+    embed()
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
         query_states.size(-1)
