@@ -21,6 +21,8 @@ from transformers.models.llama.modeling_llama import (
 
 
 def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size):
+    from IPython import embed
+    embed()
     # attn_weights (BS, head, query, keys)
 
     # expend attn_weights to be divisible by chunk_size
@@ -240,24 +242,31 @@ def quest_decode_kernel(
     position_ids = decoding_kwargs.get("position_ids", None)
     kv_seq_len = key_states.size(-2)
     print(f"[quest_decode_kernel] query_states: {query_states.shape} key_states {key_states.shape}")
-    from IPython import embed
-    embed()
 
+    # [bsz, nh, 1, seq_len] 这里还是做了 full attention 所以实际无加速
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
         query_states.size(-1)
     )
 
+    # sign 和 q 的形状一样，1代表 q 的这个地方是正的， -1 代表 q 的这个地方是 负 的
     sign = (query_states > 0) + (
         ~(query_states > 0)
     ) * -1  # [bsz, nh, q_len, kv_seq_len]
     if sign.size(-2) != 1:
         sign = sign.sum(dim=-2, keepdim=True)
+
+
     max_key = key_states * sign
+    # postive_query 把 q 都变成正的
     postive_query = query_states * sign
 
     # expend max_key to be divisible by chunk_size
     seq_length = max_key.shape[-2]
     padding_length = chunk_size - ((seq_length - 1) % chunk_size + 1)
+    # 这里 max_key 会变成 [bsz, nh, new_seq_len, size_per_head]
+    # new_seq_len 是可以被 chunk_size 整除的
+    # chunk size 默认 16
+    # 最后加入的这些 key 都是 很小的数
     max_key = torch.cat(
         [
             max_key,
@@ -271,6 +280,9 @@ def quest_decode_kernel(
     )
 
     # chunk max_key into chunk_size tokens
+    # [bsz, nh, new_seq_len // chunk_size, size_per_head]
+    # 相当于每 16 个取这个维度上的最大值
+    # max_key 是反转过 q 的，所以 q 如果这一维是 负的，找到 key 也是 负的最多的（对应 max key 就是正的）
     chunk_max_key = max_key.reshape(
         max_key.shape[0],
         max_key.shape[1],
@@ -282,6 +294,7 @@ def quest_decode_kernel(
     # duplicate chunk_max_key chunk_size times
     chunk_max_key = chunk_max_key.unsqueeze(-2).repeat(1, 1, 1, chunk_size, 1)
     # reshape chunk_max_key to the original shape
+    # 变成了原来的[bsz, nh, seq_len, size_per_head]，区别在于每 16 个都一模一样的
     chunk_max_key = chunk_max_key.reshape(
         chunk_max_key.shape[0], chunk_max_key.shape[1], -1, chunk_max_key.shape[-1]
     )[:, :, :seq_length, :]
