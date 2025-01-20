@@ -351,7 +351,7 @@ def quest_decode_kernel(
             print(f"collect attention  for layer {self.layer_idx} head {head_idx}...")
             self.debug_info["per_head_info_list"].append({
                 "head_idx": head_idx,
-                "attn_score": attn_weights.detach().cpu().numpy(),
+                "attn_score": attn_weights[0, head_idx, :, :].detach().cpu().numpy(),
             })
 
     return attn_output
