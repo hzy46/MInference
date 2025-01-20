@@ -344,7 +344,6 @@ def quest_decode_kernel(
 
     self = decoding_kwargs["self"]
     if scaling_factor != 1 and self.layer_idx >= 2:
-        print("apply scaling factor")
         attn_weights = attn_weights * scaling_factor
 
     # upcast attention to fp32
