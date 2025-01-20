@@ -73,7 +73,7 @@ def local_heavy_hitter_mask(attn_weights, token_budget, chunk_size, ensure_first
     # 确保第一个 page 在
     # ZHIYUAN：新修改
     if ensure_first_chunk:
-        print("ensure first page")
+        # print("ensure first page")
         mask_bottom[:, :, :, :chunk_size] = True
 
     return mask_bottom
@@ -247,6 +247,7 @@ def quest_decode_kernel(
     chunk_size = decoding_kwargs["attn_forward_config"].get("chunk_size", 16)
     token_budget = decoding_kwargs["attn_forward_config"].get("token_budget", 1024)
     ensure_first_chunk = decoding_kwargs["attn_forward_config"].get("ensure_first_chunk", False)
+    scaling_factor = decoding_kwargs["attn_forward_config"].get("scaling_factor", 1)
     attention_mask = decoding_kwargs.get("attention_mask", None)
     position_ids = decoding_kwargs.get("position_ids", None)
     kv_seq_len = key_states.size(-2)
@@ -340,13 +341,19 @@ def quest_decode_kernel(
     # mask_bottom 是 True 的地方保留，这个就是 False 的地方，变成了最小值
     attn_weights[~mask_bottom] = torch.tensor(torch.finfo(attn_weights.dtype).min)
 
+
+    self = decoding_kwargs["self"]
+    if scaling_factor != 1 and self.layer_idx >= 2:
+        print("apply scaling factor")
+        attn_weights = attn_weights * scaling_factor
+
     # upcast attention to fp32
     attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
         query_states.dtype
     )
     attn_output = torch.matmul(attn_weights, value_states)
 
-    self = decoding_kwargs["self"]
+
     if hasattr(self, "per_head_info_query_list") and len(self.per_head_info_query_list) > 0:
         if hasattr(self, "debug_info") is False:
             self.debug_info = {"per_head_info_list": []}
